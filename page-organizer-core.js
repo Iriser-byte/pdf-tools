@@ -64,6 +64,29 @@
         }));
     }
 
+    /**
+     * @typedef {object} PageRecord
+     * @property {string} id Stable page identifier for organizer operations.
+     * @property {number} originalIndex 1-based page index from the source document.
+     * @property {number} rotation Clockwise rotation in degrees, normalized to 0/90/180/270.
+     */
+
+    /**
+     * @typedef {object} PageOrganizerCore
+     * @property {() => PageRecord[]} getPages Returns a new array of cloned page records; mutating the snapshot does not change organizer state.
+     * @property {(pageId: string, targetIndex: number) => boolean} reorderPage Returns `false` when `pageId` is unknown or `targetIndex` is outside the current page bounds.
+     * @property {(pageId: string) => boolean} rotatePageClockwise Returns `false` when `pageId` does not match a current page.
+     * @property {(pageId: string) => boolean} deletePage Returns `false` when `pageId` does not match a current page.
+     * @property {(sourceBytes: *, exportOptions?: { pdfLib?: object }) => Promise<Uint8Array>} exportPdf Exports the current order and rotation using bytes accepted by `PDFDocument.load()`, resolves with saved PDF bytes, rejects with `TypeError` when `sourceBytes` is missing, throws when PDFLib is unavailable or malformed, and otherwise propagates PDF processing errors.
+     */
+
+    /**
+     * Creates the in-memory page organizer model for a source PDF.
+     *
+     * @param {number} pageCount Number of pages available from the source document.
+     * @param {{ pdfLib?: object }} [options] Optional default PDFLib implementation for export operations.
+     * @returns {PageOrganizerCore}
+     */
     function createPageOrganizerCore(pageCount, options) {
         const settings = options || {};
         const pages = createInitialPages(pageCount);
