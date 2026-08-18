@@ -68,7 +68,7 @@
         <main class="main-content">
             <!-- Split PDF Section -->
             <section id="split-section" class="section active">
-                <div class="upload-area" id="split-upload">
+                <div class="upload-area" id="split-upload" role="button" tabindex="0" aria-controls="split-file-input" aria-describedby="split-upload-feedback">
                     <div class="upload-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -81,12 +81,14 @@
                             file</label></p>
                 </div>
 
+                <p class="upload-feedback" id="split-upload-feedback" role="status" aria-live="polite" aria-atomic="true" data-state="idle">Sẵn sàng chọn một file PDF để cắt.</p>
+
                 <div class="file-info hidden" id="split-file-info">
                     <div class="file-details">
                         <span class="file-name" id="split-file-name"></span>
                         <span class="file-pages" id="split-file-pages"></span>
                     </div>
-                    <button class="btn-remove" id="split-remove-file">×</button>
+                    <button class="btn-remove" id="split-remove-file" type="button" aria-label="Xóa file PDF đã chọn">×</button>
                 </div>
 
                 <div class="page-selector hidden" id="split-page-selector">
@@ -120,7 +122,7 @@
 
             <!-- Merge PDF Section -->
             <section id="merge-section" class="section">
-                <div class="upload-area" id="merge-upload">
+                <div class="upload-area" id="merge-upload" role="button" tabindex="0" aria-controls="merge-file-input" aria-describedby="merge-upload-feedback">
                     <div class="upload-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -132,6 +134,8 @@
                     <p>hoặc <label class="browse-btn"><input type="file" accept=".pdf" id="merge-file-input" multiple
                                 hidden>chọn files</label></p>
                 </div>
+
+                <p class="upload-feedback" id="merge-upload-feedback" role="status" aria-live="polite" aria-atomic="true" data-state="idle">Sẵn sàng chọn các file PDF để hợp nhất.</p>
 
                 <div class="files-list hidden" id="merge-files-list">
                     <h4>Thứ tự hợp nhất (kéo để thay đổi):</h4>
@@ -151,7 +155,7 @@
 
             <!-- Convert to Image Section -->
             <section id="convert-section" class="section">
-                <div class="upload-area" id="convert-upload">
+                <div class="upload-area" id="convert-upload" role="button" tabindex="0" aria-controls="convert-file-input" aria-describedby="convert-upload-feedback">
                     <div class="upload-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -164,12 +168,14 @@
                                 hidden>chọn file</label></p>
                 </div>
 
+                <p class="upload-feedback" id="convert-upload-feedback" role="status" aria-live="polite" aria-atomic="true" data-state="idle">Sẵn sàng chọn một file PDF để chuyển đổi.</p>
+
                 <div class="file-info hidden" id="convert-file-info">
                     <div class="file-details">
                         <span class="file-name" id="convert-file-name"></span>
                         <span class="file-pages" id="convert-file-pages"></span>
                     </div>
-                    <button class="btn-remove" id="convert-remove-file">×</button>
+                    <button class="btn-remove" id="convert-remove-file" type="button" aria-label="Xóa file PDF đã chọn">×</button>
                 </div>
 
                 <div class="convert-options hidden" id="convert-options">
@@ -224,15 +230,19 @@
         </main>
 
         <!-- Progress Overlay -->
-        <div class="progress-overlay hidden" id="progress-overlay">
-            <div class="progress-modal">
-                <div class="spinner"></div>
-                <p id="progress-text">Đang xử lý...</p>
-                <div class="progress-bar">
+        <div class="progress-overlay hidden" id="progress-overlay" aria-hidden="true">
+            <div class="progress-modal" role="dialog" aria-modal="true" aria-labelledby="progress-title" aria-describedby="progress-text">
+                <div class="spinner" aria-hidden="true"></div>
+                <h2 id="progress-title">Tiến trình xử lý</h2>
+                <p id="progress-text" role="status" aria-live="polite" aria-atomic="true">Đang xử lý...</p>
+                <div class="progress-bar" role="progressbar" aria-label="Tiến trình xử lý" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                     <div class="progress-fill" id="progress-fill"></div>
                 </div>
+                <button class="btn-cancel-progress" id="progress-cancel" type="button">Hủy xử lý</button>
             </div>
         </div>
+
+        <div class="sr-only" id="app-status" role="status" aria-live="polite" aria-atomic="true"></div>
 
         <!-- Footer -->
         <footer class="footer">
