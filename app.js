@@ -72,38 +72,189 @@ const elements = {
     // Progress
     progressOverlay: document.getElementById('progress-overlay'),
     progressText: document.getElementById('progress-text'),
-    progressFill: document.getElementById('progress-fill')
+    progressFill: document.getElementById('progress-fill'),
+    progressBar: document.querySelector('.progress-bar'),
+    progressCancel: document.getElementById('progress-cancel'),
+    appStatus: document.getElementById('app-status'),
+
+    // Upload feedback
+    splitUploadFeedback: document.getElementById('split-upload-feedback'),
+    mergeUploadFeedback: document.getElementById('merge-upload-feedback'),
+    convertUploadFeedback: document.getElementById('convert-upload-feedback')
 };
+
+// ============================================
+// Accessible UI feedback and progress state
+// ============================================
+const uploadElements = {
+    split: { area: elements.splitUpload, feedback: elements.splitUploadFeedback },
+    merge: { area: elements.mergeUpload, feedback: elements.mergeUploadFeedback },
+    convert: { area: elements.convertUpload, feedback: elements.convertUploadFeedback }
+};
+
+const uploadStateMessages = {
+    idle: 'Sẵn sàng chọn file PDF.',
+    loading: 'Đang đọc file PDF.',
+    ready: 'File PDF đã sẵn sàng.',
+    processing: 'Đang xử lý file PDF.',
+    success: 'Đã hoàn tất và tải file xuống.',
+    error: 'Không thể hoàn tất thao tác.',
+    cancelled: 'Đã hủy thao tác.'
+};
+
+let activeOperation = null;
+let lastFocusedElement = null;
+
+class OperationCancelledError extends Error {
+    constructor() {
+        super('Operation cancelled');
+        this.name = 'OperationCancelledError';
+    }
+}
+
+function setUploadState(tool, status, message = uploadStateMessages[status]) {
+    const target = uploadElements[tool];
+    if (!target) return;
+
+    target.area.dataset.state = status;
+    target.area.setAttribute('aria-busy', ['loading', 'processing'].includes(status) ? 'true' : 'false');
+    target.feedback.dataset.state = status;
+    target.feedback.textContent = message;
+    elements.appStatus.textContent = message;
+}
+
+function showProgress(text = 'Đang xử lý...', percent = 0, cancellable = true) {
+    lastFocusedElement = document.activeElement;
+    elements.progressOverlay.classList.remove('hidden');
+    elements.progressOverlay.setAttribute('aria-hidden', 'false');
+    elements.progressText.textContent = text;
+    elements.progressFill.style.width = `${percent}%`;
+    elements.progressBar.setAttribute('aria-valuenow', String(Math.round(percent)));
+    elements.progressCancel.disabled = !cancellable;
+    elements.progressCancel.textContent = cancellable ? 'Hủy xử lý' : 'Đang hoàn tất...';
+    requestAnimationFrame(() => elements.progressCancel.focus());
+}
+
+function updateProgress(operation, text, percent = 0, cancellable = true) {
+    if (operation !== activeOperation) return;
+    elements.progressText.textContent = text;
+    elements.progressFill.style.width = `${percent}%`;
+    elements.progressBar.setAttribute('aria-valuenow', String(Math.round(percent)));
+    elements.progressCancel.disabled = !cancellable || operation.cancelled;
+    if (operation.cancelled) elements.progressCancel.textContent = 'Đang hủy...';
+}
+
+function hideProgress() {
+    elements.progressOverlay.classList.add('hidden');
+    elements.progressOverlay.setAttribute('aria-hidden', 'true');
+    if (lastFocusedElement instanceof HTMLElement && document.contains(lastFocusedElement)) {
+        lastFocusedElement.focus();
+    }
+    lastFocusedElement = null;
+}
+
+function startOperation(tool, text, percent = 0, status = 'processing') {
+    const operation = { tool, cancelled: false };
+    activeOperation = operation;
+    setUploadState(tool, status, text);
+    showProgress(text, percent, true);
+    return operation;
+}
+
+function assertOperationActive(operation) {
+    if (operation.cancelled || activeOperation !== operation) {
+        throw new OperationCancelledError();
+    }
+}
+
+function finishOperation(operation, status, message) {
+    if (activeOperation === operation) {
+        activeOperation = null;
+        hideProgress();
+    }
+    setUploadState(operation.tool, status, message);
+}
+
+function handleOperationError(operation, error, message) {
+    if (error instanceof OperationCancelledError) {
+        finishOperation(operation, 'cancelled', 'Đã hủy thao tác. File của bạn không được tải lên máy chủ.');
+        return;
+    }
+
+    console.error(message, error);
+    finishOperation(operation, 'error', message);
+}
+
+elements.progressCancel.addEventListener('click', () => {
+    if (!activeOperation || elements.progressCancel.disabled) return;
+    activeOperation.cancelled = true;
+    elements.progressCancel.disabled = true;
+    elements.progressCancel.textContent = 'Đang hủy...';
+    elements.progressText.textContent = 'Đang dừng sau bước hiện tại...';
+    elements.appStatus.textContent = 'Đang hủy thao tác.';
+});
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Tab' && activeOperation) {
+        event.preventDefault();
+        elements.progressCancel.focus();
+        return;
+    }
+
+    if (event.key === 'Escape' && activeOperation && !elements.progressCancel.disabled) {
+        event.preventDefault();
+        elements.progressCancel.click();
+    }
+});
 
 // ============================================
 // Tab Navigation
 // ============================================
-elements.tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-        const targetTab = tab.dataset.tab;
+function selectTab(tab) {
+    const targetTab = tab.dataset.tab;
 
-        // Update tabs
-        elements.tabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-
-        // Update sections
-        elements.sections.forEach(s => s.classList.remove('active'));
-        document.getElementById(`${targetTab}-section`).classList.add('active');
+    elements.tabs.forEach(t => {
+        const selected = t === tab;
+        t.classList.toggle('active', selected);
+        t.setAttribute('aria-selected', String(selected));
+        t.tabIndex = selected ? 0 : -1;
     });
+
+    elements.sections.forEach(s => s.classList.remove('active'));
+    document.getElementById(`${targetTab}-section`).classList.add('active');
+}
+
+elements.tabs.forEach((tab, index) => {
+    tab.id = `${tab.dataset.tab}-tab`;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-controls', `${tab.dataset.tab}-section`);
+    tab.setAttribute('aria-selected', String(tab.classList.contains('active')));
+    tab.tabIndex = tab.classList.contains('active') ? 0 : -1;
+
+    tab.addEventListener('click', () => selectTab(tab));
+    tab.addEventListener('keydown', (event) => {
+        const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'];
+        if (!keys.includes(event.key)) return;
+        event.preventDefault();
+        let nextIndex = index;
+        if (event.key === 'Home') nextIndex = 0;
+        if (event.key === 'End') nextIndex = elements.tabs.length - 1;
+        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (index + 1) % elements.tabs.length;
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (index - 1 + elements.tabs.length) % elements.tabs.length;
+        elements.tabs[nextIndex].focus();
+        selectTab(elements.tabs[nextIndex]);
+    });
+});
+
+document.querySelector('.tabs').setAttribute('role', 'tablist');
+elements.sections.forEach(section => {
+    section.setAttribute('role', 'tabpanel');
+    section.setAttribute('aria-labelledby', `${section.id.replace('-section', '')}-tab`);
 });
 
 // ============================================
 // Utility Functions
 // ============================================
-function showProgress(text = 'Đang xử lý...', percent = 0) {
-    elements.progressOverlay.classList.remove('hidden');
-    elements.progressText.textContent = text;
-    elements.progressFill.style.width = `${percent}%`;
-}
-
-function hideProgress() {
-    elements.progressOverlay.classList.add('hidden');
-}
 
 function parsePageRanges(input, maxPage) {
     const pages = new Set();
@@ -134,6 +285,10 @@ function formatFileSize(bytes) {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
+function isPdfFile(file) {
+    return file && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'));
+}
+
 async function loadPDF(file) {
     const arrayBuffer = await file.arrayBuffer();
     return await pdfjsLib.getDocument(arrayBuffer).promise;
@@ -142,7 +297,20 @@ async function loadPDF(file) {
 // ============================================
 // Drag & Drop Handlers
 // ============================================
-function setupDragDrop(uploadArea, handleFiles) {
+function setupUploadTrigger(uploadArea, fileInput) {
+    uploadArea.addEventListener('click', (event) => {
+        if (event.target.closest('label, input, button')) return;
+        fileInput.click();
+    });
+
+    uploadArea.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        fileInput.click();
+    });
+}
+
+function setupDragDrop(uploadArea, handleFiles, tool) {
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
         uploadArea.addEventListener(eventName, (e) => {
             e.preventDefault();
@@ -163,9 +331,11 @@ function setupDragDrop(uploadArea, handleFiles) {
     });
 
     uploadArea.addEventListener('drop', (e) => {
-        const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+        const files = Array.from(e.dataTransfer.files).filter(isPdfFile);
         if (files.length > 0) {
             handleFiles(files);
+        } else {
+            setUploadState(tool, 'error', 'Chỉ hỗ trợ file PDF. Vui lòng chọn lại file hợp lệ.');
         }
     });
 }
@@ -176,12 +346,19 @@ function setupDragDrop(uploadArea, handleFiles) {
 async function handleSplitFile(files) {
     const file = files[0];
     if (!file) return;
+    if (!isPdfFile(file)) {
+        setUploadState('split', 'error', 'Chỉ hỗ trợ file PDF. Vui lòng chọn lại file hợp lệ.');
+        return;
+    }
+
+    const operation = startOperation('split', 'Đang đọc PDF...', 0, 'loading');
 
     try {
-        showProgress('Đang đọc PDF...');
+        const pdfDoc = await loadPDF(file);
+        assertOperationActive(operation);
 
         state.split.file = file;
-        state.split.pdfDoc = await loadPDF(file);
+        state.split.pdfDoc = pdfDoc;
         state.split.totalPages = state.split.pdfDoc.numPages;
         state.split.selectedPages = new Set();
 
@@ -192,6 +369,7 @@ async function handleSplitFile(files) {
 
         // Update UI
         elements.splitFileName.textContent = file.name;
+        elements.splitFileName.title = file.name;
         elements.splitFilePages.textContent = `${state.split.totalPages} trang • ${formatFileSize(file.size)}`;
         elements.splitFileInfo.classList.remove('hidden');
         elements.splitPageSelector.classList.remove('hidden');
@@ -202,23 +380,27 @@ async function handleSplitFile(files) {
         elements.splitPagesInput.value = `1-${state.split.totalPages}`;
 
         // Render page thumbnails
-        await renderSplitPreviews();
+        await renderSplitPreviews(operation);
+        assertOperationActive(operation);
 
-        hideProgress();
+        finishOperation(operation, 'ready', 'PDF đã sẵn sàng. Chọn các trang bạn muốn giữ lại.');
     } catch (error) {
-        console.error('Error loading PDF:', error);
-        hideProgress();
-        alert('Lỗi: Không thể đọc file PDF này.');
+        handleOperationError(operation, error, 'Lỗi: Không thể đọc file PDF này.');
     }
 }
 
-async function renderSplitPreviews() {
+async function renderSplitPreviews(operation) {
     elements.splitPreviewGrid.innerHTML = '';
 
     for (let pageNum = 1; pageNum <= state.split.totalPages; pageNum++) {
+        assertOperationActive(operation);
         const thumbnail = document.createElement('div');
         thumbnail.className = 'page-thumbnail';
         thumbnail.dataset.page = pageNum;
+        thumbnail.setAttribute('role', 'button');
+        thumbnail.tabIndex = 0;
+        thumbnail.setAttribute('aria-label', `Chọn trang ${pageNum}`);
+        thumbnail.setAttribute('aria-pressed', String(state.split.selectedPages.has(pageNum)));
 
         if (state.split.selectedPages.has(pageNum)) {
             thumbnail.classList.add('selected');
@@ -238,17 +420,25 @@ async function renderSplitPreviews() {
         thumbnail.addEventListener('click', () => {
             togglePageSelection(pageNum);
         });
+        thumbnail.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            togglePageSelection(pageNum);
+        });
 
         elements.splitPreviewGrid.appendChild(thumbnail);
 
-        // Render thumbnail
-        renderPageThumbnail(pageNum, thumbnail.querySelector('canvas'));
+        // A render already in progress cannot be interrupted, so cancellation is observed before and after it.
+        await renderPageThumbnail(pageNum, thumbnail.querySelector('canvas'), operation);
+        assertOperationActive(operation);
     }
 }
 
-async function renderPageThumbnail(pageNum, canvas) {
+async function renderPageThumbnail(pageNum, canvas, operation) {
     try {
+        assertOperationActive(operation);
         const page = await state.split.pdfDoc.getPage(pageNum);
+        assertOperationActive(operation);
         const viewport = page.getViewport({ scale: 0.3 });
 
         canvas.width = viewport.width;
@@ -259,7 +449,9 @@ async function renderPageThumbnail(pageNum, canvas) {
             canvasContext: context,
             viewport: viewport
         }).promise;
+        assertOperationActive(operation);
     } catch (error) {
+        if (error instanceof OperationCancelledError) throw error;
         console.error(`Error rendering page ${pageNum}:`, error);
     }
 }
@@ -274,6 +466,7 @@ function togglePageSelection(pageNum) {
         state.split.selectedPages.add(pageNum);
         thumbnail.classList.add('selected');
     }
+    thumbnail.setAttribute('aria-pressed', String(state.split.selectedPages.has(pageNum)));
 
     // Update input field to match selection
     updatePagesInputFromSelection();
@@ -319,6 +512,7 @@ function updateSelectionFromInput() {
         } else {
             thumb.classList.remove('selected');
         }
+        thumb.setAttribute('aria-pressed', String(state.split.selectedPages.has(pageNum)));
     });
 }
 
@@ -331,6 +525,7 @@ function resetSplit() {
     elements.splitPagesInput.value = '';
     elements.splitPreviewGrid.innerHTML = '';
     elements.splitFileInput.value = '';
+    setUploadState('split', 'idle', 'Sẵn sàng chọn một file PDF để cắt.');
 }
 
 async function splitPDF() {
@@ -341,30 +536,32 @@ async function splitPDF() {
         return;
     }
 
+    const operation = startOperation('split', 'Đang cắt PDF...', 0);
+
     try {
-        showProgress('Đang cắt PDF...', 0);
 
         const srcPdfBytes = await state.split.file.arrayBuffer();
         const srcPdf = await PDFLib.PDFDocument.load(srcPdfBytes);
         const newPdf = await PDFLib.PDFDocument.create();
 
         for (let i = 0; i < pages.length; i++) {
+            assertOperationActive(operation);
             const [copiedPage] = await newPdf.copyPages(srcPdf, [pages[i] - 1]);
+            assertOperationActive(operation);
             newPdf.addPage(copiedPage);
-            showProgress(`Đang xử lý trang ${i + 1}/${pages.length}...`, ((i + 1) / pages.length) * 100);
+            updateProgress(operation, `Đang xử lý trang ${i + 1}/${pages.length}...`, ((i + 1) / pages.length) * 100);
         }
 
         const pdfBytes = await newPdf.save();
+        assertOperationActive(operation);
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
 
         const fileName = state.split.file.name.replace('.pdf', '') + '_split.pdf';
         saveAs(blob, fileName);
 
-        hideProgress();
+        finishOperation(operation, 'success', 'Đã cắt PDF và bắt đầu tải file xuống.');
     } catch (error) {
-        console.error('Error splitting PDF:', error);
-        hideProgress();
-        alert('Lỗi: Không thể cắt file PDF.');
+        handleOperationError(operation, error, 'Lỗi: Không thể cắt file PDF.');
     }
 }
 
@@ -376,15 +573,18 @@ async function splitToImages() {
         return;
     }
 
+    const operation = startOperation('split', 'Đang chuyển đổi...', 0);
+
     try {
-        showProgress('Đang chuyển đổi...', 0);
 
         const zip = new JSZip();
         const scale = 150 / 72; // 150 DPI
 
         for (let i = 0; i < pages.length; i++) {
+            assertOperationActive(operation);
             const pageNum = pages[i];
             const page = await state.split.pdfDoc.getPage(pageNum);
+            assertOperationActive(operation);
             const viewport = page.getViewport({ scale });
 
             const canvas = document.createElement('canvas');
@@ -396,6 +596,7 @@ async function splitToImages() {
                 canvasContext: context,
                 viewport: viewport
             }).promise;
+            assertOperationActive(operation);
 
             const blob = await new Promise(resolve => {
                 canvas.toBlob(resolve, 'image/png');
@@ -404,24 +605,24 @@ async function splitToImages() {
             const fileName = `page_${String(pageNum).padStart(3, '0')}.png`;
             zip.file(fileName, blob);
 
-            showProgress(`Đang xử lý trang ${i + 1}/${pages.length}...`, ((i + 1) / pages.length) * 100);
+            updateProgress(operation, `Đang xử lý trang ${i + 1}/${pages.length}...`, ((i + 1) / pages.length) * 100);
         }
 
-        showProgress('Đang tạo file ZIP...');
+        updateProgress(operation, 'Đang tạo file ZIP...', 100);
         const zipBlob = await zip.generateAsync({ type: 'blob' });
+        assertOperationActive(operation);
         const zipName = state.split.file.name.replace('.pdf', '') + '_images.zip';
         saveAs(zipBlob, zipName);
 
-        hideProgress();
+        finishOperation(operation, 'success', 'Đã chuyển các trang thành ảnh và bắt đầu tải ZIP xuống.');
     } catch (error) {
-        console.error('Error converting to images:', error);
-        hideProgress();
-        alert('Lỗi: Không thể chuyển đổi sang ảnh.');
+        handleOperationError(operation, error, 'Lỗi: Không thể chuyển đổi sang ảnh.');
     }
 }
 
 // Split event listeners
-setupDragDrop(elements.splitUpload, handleSplitFile);
+setupUploadTrigger(elements.splitUpload, elements.splitFileInput);
+setupDragDrop(elements.splitUpload, handleSplitFile, 'split');
 elements.splitFileInput.addEventListener('change', (e) => handleSplitFile(Array.from(e.target.files)));
 elements.splitRemoveFile.addEventListener('click', resetSplit);
 elements.splitPagesInput.addEventListener('input', updateSelectionFromInput);
@@ -432,24 +633,52 @@ elements.splitToImagesBtn.addEventListener('click', splitToImages);
 // MERGE PDF Functions
 // ============================================
 async function handleMergeFiles(files) {
-    showProgress('Đang đọc PDF...');
-
-    for (const file of files) {
-        try {
-            const pdfDoc = await loadPDF(file);
-            state.merge.files.push({
-                file,
-                numPages: pdfDoc.numPages,
-                id: Date.now() + Math.random()
-            });
-            state.merge.pdfDocs.push(pdfDoc);
-        } catch (error) {
-            console.error(`Error loading ${file.name}:`, error);
-        }
+    const pdfFiles = files.filter(isPdfFile);
+    if (pdfFiles.length === 0) {
+        setUploadState('merge', 'error', 'Chỉ hỗ trợ file PDF. Vui lòng chọn lại file hợp lệ.');
+        return;
     }
 
-    updateMergeList();
-    hideProgress();
+    const operation = startOperation('merge', 'Đang đọc PDF...', 0, 'loading');
+    const loadedFiles = [];
+    const loadedDocs = [];
+    let failedFiles = 0;
+
+    try {
+        for (let index = 0; index < pdfFiles.length; index++) {
+            assertOperationActive(operation);
+            const file = pdfFiles[index];
+            try {
+                const pdfDoc = await loadPDF(file);
+                assertOperationActive(operation);
+                loadedFiles.push({
+                    file,
+                    numPages: pdfDoc.numPages,
+                    id: Date.now() + Math.random()
+                });
+                loadedDocs.push(pdfDoc);
+            } catch (error) {
+                if (error instanceof OperationCancelledError) throw error;
+                failedFiles++;
+                console.error(`Error loading ${file.name}:`, error);
+            }
+            updateProgress(operation, `Đang đọc file ${index + 1}/${pdfFiles.length}...`, ((index + 1) / pdfFiles.length) * 100);
+        }
+
+        if (loadedFiles.length === 0) {
+            throw new Error('No readable PDFs');
+        }
+
+        state.merge.files.push(...loadedFiles);
+        state.merge.pdfDocs.push(...loadedDocs);
+        updateMergeList();
+        const message = failedFiles > 0
+            ? `Đã sẵn sàng ${loadedFiles.length} file. ${failedFiles} file không thể đọc đã được bỏ qua.`
+            : `Đã sẵn sàng ${loadedFiles.length} file PDF để hợp nhất.`;
+        finishOperation(operation, 'ready', message);
+    } catch (error) {
+        handleOperationError(operation, error, 'Lỗi: Không thể đọc các file PDF đã chọn.');
+    }
 }
 
 function updateMergeList() {
@@ -464,20 +693,39 @@ function updateMergeList() {
     elements.mergeFilesList.classList.remove('hidden');
     elements.mergeBtn.classList.remove('hidden');
 
-    elements.mergeSortable.innerHTML = state.merge.files.map((item, index) => `
-        <li class="sortable-item" data-id="${item.id}" draggable="true">
-            <div class="drag-handle">
-                <span></span>
-                <span></span>
-                <span></span>
-            </div>
-            <div class="file-info-inline">
-                <span class="file-name">${item.file.name}</span>
-                <span class="file-pages">${item.numPages} trang</span>
-            </div>
-            <button class="btn-remove" onclick="removeMergeFile(${index})">×</button>
-        </li>
-    `).join('');
+    elements.mergeSortable.replaceChildren();
+    state.merge.files.forEach((item, index) => {
+        const listItem = document.createElement('li');
+        listItem.className = 'sortable-item';
+        listItem.dataset.id = item.id;
+        listItem.draggable = true;
+
+        const dragHandle = document.createElement('div');
+        dragHandle.className = 'drag-handle';
+        dragHandle.setAttribute('aria-hidden', 'true');
+        for (let i = 0; i < 3; i++) dragHandle.appendChild(document.createElement('span'));
+
+        const fileInfo = document.createElement('div');
+        fileInfo.className = 'file-info-inline';
+        const fileName = document.createElement('span');
+        fileName.className = 'file-name';
+        fileName.textContent = item.file.name;
+        fileName.title = item.file.name;
+        const filePages = document.createElement('span');
+        filePages.className = 'file-pages';
+        filePages.textContent = `${item.numPages} trang`;
+        fileInfo.append(fileName, filePages);
+
+        const removeButton = document.createElement('button');
+        removeButton.className = 'btn-remove';
+        removeButton.type = 'button';
+        removeButton.textContent = '×';
+        removeButton.setAttribute('aria-label', `Xóa ${item.file.name} khỏi danh sách hợp nhất`);
+        removeButton.addEventListener('click', () => removeMergeFile(index));
+
+        listItem.append(dragHandle, fileInfo, removeButton);
+        elements.mergeSortable.appendChild(listItem);
+    });
 
     // Update total pages
     const totalPages = state.merge.files.reduce((sum, item) => sum + item.numPages, 0);
@@ -537,11 +785,14 @@ function updateMergeOrder() {
     state.merge.pdfDocs = newDocs;
 }
 
-window.removeMergeFile = function (index) {
+function removeMergeFile(index) {
     state.merge.files.splice(index, 1);
     state.merge.pdfDocs.splice(index, 1);
     updateMergeList();
-};
+    setUploadState('merge', state.merge.files.length ? 'ready' : 'idle', state.merge.files.length
+        ? 'Danh sách file PDF đã được cập nhật.'
+        : 'Sẵn sàng chọn các file PDF để hợp nhất.');
+}
 
 async function mergePDFs() {
     if (state.merge.files.length < 2) {
@@ -549,34 +800,39 @@ async function mergePDFs() {
         return;
     }
 
+    const operation = startOperation('merge', 'Đang hợp nhất PDF...', 0);
+
     try {
-        showProgress('Đang hợp nhất PDF...', 0);
 
         const mergedPdf = await PDFLib.PDFDocument.create();
 
         for (let i = 0; i < state.merge.files.length; i++) {
+            assertOperationActive(operation);
             const file = state.merge.files[i].file;
             const pdfBytes = await file.arrayBuffer();
+            assertOperationActive(operation);
             const pdf = await PDFLib.PDFDocument.load(pdfBytes);
+            assertOperationActive(operation);
             const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+            assertOperationActive(operation);
             copiedPages.forEach(page => mergedPdf.addPage(page));
-            showProgress(`Đang xử lý file ${i + 1}/${state.merge.files.length}...`, ((i + 1) / state.merge.files.length) * 100);
+            updateProgress(operation, `Đang xử lý file ${i + 1}/${state.merge.files.length}...`, ((i + 1) / state.merge.files.length) * 100);
         }
 
         const pdfBytes = await mergedPdf.save();
+        assertOperationActive(operation);
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         saveAs(blob, 'merged.pdf');
 
-        hideProgress();
+        finishOperation(operation, 'success', 'Đã hợp nhất PDF và bắt đầu tải file xuống.');
     } catch (error) {
-        console.error('Error merging PDFs:', error);
-        hideProgress();
-        alert('Lỗi: Không thể hợp nhất file PDF.');
+        handleOperationError(operation, error, 'Lỗi: Không thể hợp nhất file PDF.');
     }
 }
 
 // Merge event listeners
-setupDragDrop(elements.mergeUpload, handleMergeFiles);
+setupUploadTrigger(elements.mergeUpload, elements.mergeFileInput);
+setupDragDrop(elements.mergeUpload, handleMergeFiles, 'merge');
 elements.mergeFileInput.addEventListener('change', (e) => handleMergeFiles(Array.from(e.target.files)));
 elements.mergeBtn.addEventListener('click', mergePDFs);
 
@@ -586,27 +842,33 @@ elements.mergeBtn.addEventListener('click', mergePDFs);
 async function handleConvertFile(files) {
     const file = files[0];
     if (!file) return;
+    if (!isPdfFile(file)) {
+        setUploadState('convert', 'error', 'Chỉ hỗ trợ file PDF. Vui lòng chọn lại file hợp lệ.');
+        return;
+    }
+
+    const operation = startOperation('convert', 'Đang đọc PDF...', 0, 'loading');
 
     try {
-        showProgress('Đang đọc PDF...');
+        const pdfDoc = await loadPDF(file);
+        assertOperationActive(operation);
 
         state.convert.file = file;
-        state.convert.pdfDoc = await loadPDF(file);
+        state.convert.pdfDoc = pdfDoc;
         state.convert.totalPages = state.convert.pdfDoc.numPages;
 
         // Update UI
         elements.convertFileName.textContent = file.name;
+        elements.convertFileName.title = file.name;
         elements.convertFilePages.textContent = `${state.convert.totalPages} trang • ${formatFileSize(file.size)}`;
         elements.convertFileInfo.classList.remove('hidden');
         elements.convertOptions.classList.remove('hidden');
         elements.convertBtn.classList.remove('hidden');
         elements.convertUpload.classList.add('hidden');
 
-        hideProgress();
+        finishOperation(operation, 'ready', 'PDF đã sẵn sàng. Chọn tùy chọn xuất ảnh.');
     } catch (error) {
-        console.error('Error loading PDF:', error);
-        hideProgress();
-        alert('Lỗi: Không thể đọc file PDF này.');
+        handleOperationError(operation, error, 'Lỗi: Không thể đọc file PDF này.');
     }
 }
 
@@ -617,6 +879,7 @@ function resetConvert() {
     elements.convertBtn.classList.add('hidden');
     elements.convertUpload.classList.remove('hidden');
     elements.convertFileInput.value = '';
+    setUploadState('convert', 'idle', 'Sẵn sàng chọn một file PDF để chuyển đổi.');
 }
 
 async function convertToImages() {
@@ -640,15 +903,18 @@ async function convertToImages() {
         }
     }
 
+    const operation = startOperation('convert', 'Đang chuyển đổi...', 0);
+
     try {
-        showProgress('Đang chuyển đổi...', 0);
 
         const zip = new JSZip();
         const mimeType = format === 'png' ? 'image/png' : 'image/jpeg';
 
         for (let i = 0; i < pagesToConvert.length; i++) {
+            assertOperationActive(operation);
             const pageNum = pagesToConvert[i];
             const page = await state.convert.pdfDoc.getPage(pageNum);
+            assertOperationActive(operation);
             const viewport = page.getViewport({ scale });
 
             // Create canvas
@@ -662,6 +928,7 @@ async function convertToImages() {
                 canvasContext: context,
                 viewport: viewport
             }).promise;
+            assertOperationActive(operation);
 
             // Convert to blob
             const blob = await new Promise(resolve => {
@@ -672,25 +939,25 @@ async function convertToImages() {
             const fileName = `page_${String(pageNum).padStart(3, '0')}.${format}`;
             zip.file(fileName, blob);
 
-            showProgress(`Đang xử lý trang ${i + 1}/${pagesToConvert.length}...`, ((i + 1) / pagesToConvert.length) * 100);
+            updateProgress(operation, `Đang xử lý trang ${i + 1}/${pagesToConvert.length}...`, ((i + 1) / pagesToConvert.length) * 100);
         }
 
         // Generate zip
-        showProgress('Đang tạo file ZIP...');
+        updateProgress(operation, 'Đang tạo file ZIP...', 100);
         const zipBlob = await zip.generateAsync({ type: 'blob' });
+        assertOperationActive(operation);
         const zipName = state.convert.file.name.replace('.pdf', '') + '_images.zip';
         saveAs(zipBlob, zipName);
 
-        hideProgress();
+        finishOperation(operation, 'success', 'Đã chuyển PDF thành ảnh và bắt đầu tải ZIP xuống.');
     } catch (error) {
-        console.error('Error converting PDF:', error);
-        hideProgress();
-        alert('Lỗi: Không thể chuyển đổi PDF sang ảnh.');
+        handleOperationError(operation, error, 'Lỗi: Không thể chuyển đổi PDF sang ảnh.');
     }
 }
 
 // Convert event listeners
-setupDragDrop(elements.convertUpload, handleConvertFile);
+setupUploadTrigger(elements.convertUpload, elements.convertFileInput);
+setupDragDrop(elements.convertUpload, handleConvertFile, 'convert');
 elements.convertFileInput.addEventListener('change', (e) => handleConvertFile(Array.from(e.target.files)));
 elements.convertRemoveFile.addEventListener('click', resetConvert);
 elements.convertBtn.addEventListener('click', convertToImages);
